@@ -48,6 +48,58 @@ def initializeView(view_string):
 global SYS_VIEW
 SYS_VIEW = initializeView(environ['VIEW'])
 
+global SHARD_COUNT
+SHARD_COUNT = int(environ['SHARD_COUNT'])
+
+def initializeShardMembers(sys_view, shard_count):
+    view = list(sys_view.keys())
+    shard_members = [[] for i in range(SHARD_COUNT)]
+    shard_id = 0 
+    for replica in view:
+        shard_members[shard_id].append(replica)
+        shard_id += 1
+        if (shard_id == shard_count):
+            shard_id = 0
+
+    return shard_members
+
+global SHARD_MEMBERS
+SHARD_MEMBERS = initializeShardMembers(SYS_VIEW, SHARD_COUNT)
+
+def getShardID(replica):
+    for shard_id in range(SHARD_COUNT):
+        if replica in SHARD_MEMBERS[shard_id]:
+            return shard_id
+    return -1
+
+
+@app.route('/key-value-store-shard/shard-ids', methods=['GET'])
+def get_shard_ids():
+    id_str = ""
+    for i in range(SHARD_COUNT):
+        id_str += (str(i) + ',')
+    id_str = id_str.rstrip(',')
+    response = jsonify()
+    response.data = json.dumps({"message":"Shard IDs retrieved successfully", "shard-ids":id_str})
+    response.status_code = 200
+    return response
+
+@app.route('/key-value-store-shard/node-shard-id', methods=['GET'])
+def get_node_shard_id():
+    shard_id = getShardID(SOCKET_ADDRESS)
+    response = jsonify()
+    response.data = json.dumps({"message":"Shard ID of the node retrieved successfully", "shard-id":shard_id})
+    response.status_code = 200
+    return response
+
+@app.route('/key-value-store-shard/shard-id-members/<shard_id>', methods=['GET'])
+def get_shard_id_members(shard_id):
+    shard_members = ','.join(SHARD_MEMBERS[int(shard_id)])
+    response = jsonify()
+    response.data = json.dumps({"message":"Members of shard ID retrieved successfully", "shard-id-members":shard_members})
+    response.status_code = 200
+    return response
+
 # Returns the forward url
 def get_forward_url(forward_address, key):
     return "http://" + forward_address + "/key-value-store/" + key
