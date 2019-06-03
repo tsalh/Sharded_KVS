@@ -53,6 +53,7 @@ SHARD_COUNT = int(environ['SHARD_COUNT'])
 
 def initializeShardMembers(sys_view, shard_count):
     view = list(sys_view.keys())
+    view.sort()
     shard_members = [[] for i in range(SHARD_COUNT)]
     shard_id = 0 
     for replica in view:
