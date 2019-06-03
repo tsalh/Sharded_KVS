@@ -1,0 +1,4 @@
+tsalh - implemented KVS class
+cohcunni - handled PUT request
+jliang39 - handled DELETE request and made Dockerfile
+clhalee - handled GET request

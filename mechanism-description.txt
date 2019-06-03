@@ -1,0 +1,5 @@
+Mechanism: The mechanism we used to for checking for causal history is from
+using the causal dependency list
+
+To detect a replica is down we set a timeout for 2 seconds if the replica does
+not respond we assume it is down and change the view.
