@@ -49,9 +49,9 @@ global SYS_VIEW
 SYS_VIEW = initializeView(environ['VIEW'])
 
 global SHARD_COUNT
-SHARD_COUNT = int(environ['SHARD_COUNT'])
+SHARD_COUNT = int(os.getenv('SHARD_COUNT', 0))
 
-def initializeShardMembers(sys_view, shard_count):
+def assignShardMembers(sys_view, shard_count):
     view = list(sys_view.keys())
     view.sort()
     shard_members = [[] for i in range(SHARD_COUNT)]
@@ -65,7 +65,7 @@ def initializeShardMembers(sys_view, shard_count):
     return shard_members
 
 global SHARD_MEMBERS
-SHARD_MEMBERS = initializeShardMembers(SYS_VIEW, SHARD_COUNT)
+SHARD_MEMBERS = assignShardMembers(SYS_VIEW, SHARD_COUNT)
 
 def getShardID(replica):
     for shard_id in range(SHARD_COUNT):
@@ -100,6 +100,58 @@ def get_shard_id_members(shard_id):
     response.data = json.dumps({"message":"Members of shard ID retrieved successfully", "shard-id-members":shard_members})
     response.status_code = 200
     return response
+
+@app.route('/key-value-store-shard/shard-id-key-count/<shard_id>', methods=['GET'])
+def get_shard_key_count(shard_id):
+	if (getShardID(SOCKET_ADDRESS) == int(shard_id)):
+		response = jsonify()
+		response.data = json.dumps({"message":"Key count of shard ID retrieved successfully","shard-id-key-count":kvs.length()})
+		response.status_code = 200
+	else :
+		replica = SHARD_MEMBERS[int(shard_id)][0]
+		forward_url = "http://" + replica + request.full_path
+		response = get_forward_response(forward_url, request.method)
+	return response
+
+@app.route('/key-value-store-shard/add-member/<shard_id>', methods=['PUT'])
+def add_shard_member(shard_id):
+	new_member = request.args.get('socket-address')
+	SHARD_MEMBERS[int(shard_id)].append(new_member)
+	if not request.args.get('broadcasted'):
+		broadcast(request._get_current_object())
+#		for replica in SYS_VIEW:
+#			if replica != SOCKET_ADDRESS:
+#				try:
+#					forward_url = "http://" + replica + request.full_path
+#					requests.put(forward_url, json=request.get_json, params={'broadcasted':True}, timeout=TIMEOUT)
+#				except requests.exceptions.RequestException:
+#					app.logger.info("add-member broadcast to replica [%s] failed", replica)
+
+
+def broadcast(request_object):
+    for replica in SYS_VIEW:
+        if SYS_VIEW[replica] and replica != SOCKET_ADDRESS:
+            app.logger.info('[%s] Broadcasting to replica %s...',SOCKET_ADDRESS, replica)
+            try:
+                response = requests.request(method=request_object.method,
+                	url="http://" + replica + request_object.full_path,
+                	headers={key: value for (key, value) in request_object.headers},
+                	data=my_request.get_data(),
+                	params={'broadcasted':True})
+
+            except requests.exceptions.RequestException:
+                app.logger.info("Broadcast to [%s] has failed, removing replica from view", replica)
+                SYS_VIEW[replica] = False
+                del_request_object = Request.from_values(method='DELETE',
+                	url="http://thisgetsreplaced:8080/key-value-store-view",
+                	json={"delete_replica":replica})
+                broadcast(del_request_object)
+             
+    app.logger.info("Done broadcasting for %s", SOCKET_ADDRESS)
+    return
+
+
+
 
 # Returns the forward url
 def get_forward_url(forward_address, key):

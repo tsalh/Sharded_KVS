@@ -30,3 +30,6 @@ class KVS:
 
     def set_dictionary(self, new_dict):
         self.__dict = new_dict
+
+    def length(self):
+        return len(self.__dict)
