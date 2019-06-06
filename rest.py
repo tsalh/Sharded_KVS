@@ -260,14 +260,14 @@ def put(key):
     shardForKey = hash( key ) % SHARD_COUNT
     # If key belongs to this shard
     thisShardId = getShardID( SOCKET_ADDRESS )
+    new_version = get_new_version()
+    if metadata:
+        metadata = metadata + ',' + new_version
+    else:
+        metadata = new_version
     print( "This shard id: ", thisShardId )
     print( "Shard for key: ", shardForKey )
     if shardForKey == thisShardId:
-        new_version = get_new_version()
-        if metadata:
-            metadata = metadata + ',' + new_version
-        else:
-            metadata = new_version
         # Update key if it already exists
         if kvs.key_exists(key):
             kvs.put(key, (new_version, value))
