@@ -7,6 +7,7 @@ import socket
 import sys
 import time
 from multiprocessing import Process
+import os
 
 
 
@@ -23,20 +24,12 @@ kvs.put('x', ('test_version', 5))
 kvs.put('y', ('test_version', 5))
 kvs.put('z', ('test_version', 5))
 
-# IP address of this node
-#SOCKET_ADDRESS = environ['SOCKET_ADDRESS']
-# List of IP addresses for all nodes
-#SYS_VIEW = environ['VIEW'].split(',')
-
-# IP address of this node
-SOCKET_ADDRESS = environ['SOCKET_ADDRESS']
-# List of IP addresses for all nodes
-
-TIMEOUT = 2.00
-
-# Version: Casual dependencies
-CAUSAL_HISTORY = {'test_version':'test_metadata'}
-VERSION = int(0)
+global SOCKET_ADDRESS
+global SYS_VIEW
+global VERSION
+global TIMEOUT
+global SHARD_COUNT
+global SHARD_MEMBERS
 
 def initializeView(view_string):
     view = view_string.split(",")
@@ -45,29 +38,29 @@ def initializeView(view_string):
         view_map[replica] = False
     return view_map
 
-global SYS_VIEW
-SYS_VIEW = initializeView(environ['VIEW'])
-
-global SHARD_COUNT
-SHARD_COUNT = int(os.getenv('SHARD_COUNT', 0))
-
+# As long as it's passed the same SYS_VIEW and SHARD_COUNT this will generate
+# the same shard_members.
 def assignShardMembers(sys_view, shard_count):
     view = list(sys_view.keys())
     view.sort()
-    shard_members = [[] for i in range(SHARD_COUNT)]
+    if shard_count == 0:
+        view.delete(SOCKET_ADDRESS)
+        shard_count = retrieve_shard_count()
+        #this is an extre check so the assgn 3 script would still pass
+        if shard_count == 0:
+            return
+    shard_members = [[] for i in range(shard_count)]
     shard_id = 0 
     for replica in view:
         shard_members[shard_id].append(replica)
         shard_id += 1
-        if (shard_id == shard_count):
+        if shard_id == shard_count:
             shard_id = 0
-
     return shard_members
 
-global SHARD_MEMBERS
-SHARD_MEMBERS = assignShardMembers(SYS_VIEW, SHARD_COUNT)
 
 def getShardID(replica):
+    global SHARD_COUNT, SHARD_MEMBERS
     for shard_id in range(SHARD_COUNT):
         if replica in SHARD_MEMBERS[shard_id]:
             return shard_id
@@ -76,6 +69,7 @@ def getShardID(replica):
 
 @app.route('/key-value-store-shard/shard-ids', methods=['GET'])
 def get_shard_ids():
+    global SHARD_COUNT
     id_str = ""
     for i in range(SHARD_COUNT):
         id_str += (str(i) + ',')
@@ -87,6 +81,7 @@ def get_shard_ids():
 
 @app.route('/key-value-store-shard/node-shard-id', methods=['GET'])
 def get_node_shard_id():
+    global SOCKET_ADDRESS
     shard_id = getShardID(SOCKET_ADDRESS)
     response = jsonify()
     response.data = json.dumps({"message":"Shard ID of the node retrieved successfully", "shard-id":shard_id})
@@ -95,6 +90,7 @@ def get_node_shard_id():
 
 @app.route('/key-value-store-shard/shard-id-members/<shard_id>', methods=['GET'])
 def get_shard_id_members(shard_id):
+    global SHARD_MEMBERS
     shard_members = ','.join(SHARD_MEMBERS[int(shard_id)])
     response = jsonify()
     response.data = json.dumps({"message":"Members of shard ID retrieved successfully", "shard-id-members":shard_members})
@@ -103,55 +99,56 @@ def get_shard_id_members(shard_id):
 
 @app.route('/key-value-store-shard/shard-id-key-count/<shard_id>', methods=['GET'])
 def get_shard_key_count(shard_id):
-	if (getShardID(SOCKET_ADDRESS) == int(shard_id)):
-		response = jsonify()
-		response.data = json.dumps({"message":"Key count of shard ID retrieved successfully","shard-id-key-count":kvs.length()})
-		response.status_code = 200
-	else :
-		replica = SHARD_MEMBERS[int(shard_id)][0]
-		forward_url = "http://" + replica + request.full_path
-		response = get_forward_response(forward_url, request.method)
-	return response
+    global SOCKET_ADDRESS
+    global SHARD_MEMBERS
+    shard_id = int(shard_id)
+    if getShardID(SOCKET_ADDRESS) == shard_id:
+        response = jsonify()
+        key_count = str(kvs.length())
+        response.data = json.dumps({"message":"Key count of shard ID retrieved successfully","shard-id-key-count":key_count})
+        response.status_code = 200
+    else :
+        replica = SHARD_MEMBERS[shard_id][0]
+        forward_url = "http://" + replica + request.full_path
+        response = get_forward_response(forward_url, request.method)
+    return response
 
 @app.route('/key-value-store-shard/add-member/<shard_id>', methods=['PUT'])
 def add_shard_member(shard_id):
-	new_member = request.args.get('socket-address')
-	SHARD_MEMBERS[int(shard_id)].append(new_member)
-	if not request.args.get('broadcasted'):
-		broadcast(request._get_current_object())
-#		for replica in SYS_VIEW:
-#			if replica != SOCKET_ADDRESS:
-#				try:
-#					forward_url = "http://" + replica + request.full_path
-#					requests.put(forward_url, json=request.get_json, params={'broadcasted':True}, timeout=TIMEOUT)
-#				except requests.exceptions.RequestException:
-#					app.logger.info("add-member broadcast to replica [%s] failed", replica)
+    global SOCKET_ADDRESS
+    global SHARD_MEMBERS
+    global SYS_VIEW
+    shard_id = int(shard_id)
+    content = request.get_json()
+    new_member = content['socket-address']
+    SHARD_MEMBERS[shard_id].append(new_member)
+    if not request.args.get('broadcasted'):
+        for replica in SYS_VIEW:
+            if SYS_VIEW[replica] and replica != SOCKET_ADDRESS:
+                try:
+                    forward_url = "http://" + replica + request.full_path
+                    requests.put(forward_url, json=request.get_json, params={'broadcasted':True}, timeout=TIMEOUT)
+                except requests.exceptions.RequestException:
+                    app.logger.info("add-member broadcast to replica [%s] failed", replica)
+    return '', 204
 
 
-def broadcast(request_object):
+@app.route('/shard-count', methods=['GET'])
+def get_shard_count():
+    global SHARD_COUNT
+    return json.dumps({"shard_count":str(SHARD_COUNT)})
+
+def retrieve_shard_count():
+    global SOCKET_ADDRESS
+    global SYS_VIEW
     for replica in SYS_VIEW:
         if SYS_VIEW[replica] and replica != SOCKET_ADDRESS:
-            app.logger.info('[%s] Broadcasting to replica %s...',SOCKET_ADDRESS, replica)
-            try:
-                response = requests.request(method=request_object.method,
-                	url="http://" + replica + request_object.full_path,
-                	headers={key: value for (key, value) in request_object.headers},
-                	data=my_request.get_data(),
-                	params={'broadcasted':True})
-
-            except requests.exceptions.RequestException:
-                app.logger.info("Broadcast to [%s] has failed, removing replica from view", replica)
-                SYS_VIEW[replica] = False
-                del_request_object = Request.from_values(method='DELETE',
-                	url="http://thisgetsreplaced:8080/key-value-store-view",
-                	json={"delete_replica":replica})
-                broadcast(del_request_object)
-             
-    app.logger.info("Done broadcasting for %s", SOCKET_ADDRESS)
-    return
-
-
-
+            url = "http://" + replica + "/shard-count"
+            response = requests.get(url, timeout=TIMEOUT)
+            json = response.json()
+            if (json['shard_count']):
+                return int(json['shard_count'])
+    return 0
 
 # Returns the forward url
 def get_forward_url(forward_address, key):
@@ -421,18 +418,35 @@ def append_kvs(kvs_import):
     for key in kvs_import:
         if not kvs.key_exists(key):
             kvs.put(key, kvs_import[key])
-def setup(view_string, replica_name):
-    view = view_string.split(",")
-    SYS_VIEW[replica_name] = True
-    print(view)
 
+
+def setup():
+    global SOCKET_ADDRESS
+    global SYS_VIEW
+    global CAUSAL_HISTORY
+    global VERSION
+    global TIMEOUT
+    global SHARD_COUNT
+    global SHARD_MEMBERS
+    
+    SOCKET_ADDRESS = environ['SOCKET_ADDRESS']
+    SYS_VIEW = initializeView(environ['VIEW'])
+    #CAUSAL_HISTORY = {'test_version':'test_metadata'}
+    
+    VERSION = int(0)
+    TIMEOUT = 2.00
+    SHARD_COUNT = int(os.getenv('SHARD_COUNT', '0'))
+    SHARD_MEMBERS = assignShardMembers(SYS_VIEW, SHARD_COUNT)
+
+    
+    SYS_VIEW[SOCKET_ADDRESS] = True
     crashed_replicas = []
-    for replica in view:
+    for replica in SYS_VIEW:
         if SYS_VIEW[replica] == False:
             try:
                 url = "http://" + replica + "/key-value-store-view"
                 print("Put URL:" + url)
-                response = requests.put(url, json={"replica_sender":replica_name}, timeout=TIMEOUT)
+                response = requests.put(url, json={"replica_sender":SOCKET_ADDRESS}, timeout=TIMEOUT)
                 SYS_VIEW[replica] = True
                 print(SYS_VIEW)
                 print(replica)
@@ -452,7 +466,7 @@ def setup(view_string, replica_name):
             print("Here")
             
     for replica in SYS_VIEW:
-        if replica != replica_name and SYS_VIEW[replica] == True:
+        if replica != SOCKET_ADDRESS and SYS_VIEW[replica] == True:
             kvs_url = "http://" + replica + "/kvs"
             causal_url = "http://" + replica + "/connect"
             kvs_response = requests.get(kvs_url)
@@ -464,7 +478,7 @@ def setup(view_string, replica_name):
             print(CAUSAL_HISTORY)
             print(kvs.get_dictionary())
 with app.app_context():
-    setup(environ['VIEW'], SOCKET_ADDRESS)
+    setup()
     
 
 if __name__ == '__main__':
