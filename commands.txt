@@ -1,0 +1,21 @@
+sudo docker network create --subnet=10.10.0.0/16 assignment4-net
+
+sudo docker build -t assignment4-image .
+
+sudo docker run -p 8082:8080 --net=assignment4-net --ip=10.10.0.2 --name="node1" -e SOCKET_ADDRESS="10.10.0.2:8080" -e VIEW="10.10.0.2:8080,10.10.0.3:8080,10.10.0.4:8080,10.10.0.5:8080,10.10.0.6:8080,10.10.0.7:8080" -e SHARD_COUNT="2" assignment4-image
+
+sudo docker run -p 8083:8080 --net=assignment4-net --ip=10.10.0.3 --name="node2" -e SOCKET_ADDRESS="10.10.0.3:8080" -e VIEW="10.10.0.2:8080,10.10.0.3:8080,10.10.0.4:8080,10.10.0.5:8080,10.10.0.6:8080,10.10.0.7:8080" -e SHARD_COUNT="2" assignment4-image
+
+sudo docker run -p 8084:8080 --net=assignment4-net --ip=10.10.0.4 --name="node3" -e SOCKET_ADDRESS="10.10.0.4:8080" -e VIEW="10.10.0.2:8080,10.10.0.3:8080,10.10.0.4:8080,10.10.0.5:8080,10.10.0.6:8080,10.10.0.7:8080" -e SHARD_COUNT="2" assignment4-image
+
+sudo docker run -p 8085:8080 --net=assignment4-net --ip=10.10.0.5 --name="node4" -e SOCKET_ADDRESS="10.10.0.5:8080" -e VIEW="10.10.0.2:8080,10.10.0.3:8080,10.10.0.4:8080,10.10.0.5:8080,10.10.0.6:8080,10.10.0.7:8080" -e SHARD_COUNT="2" assignment4-image
+
+sudo docker run -p 8086:8080 --net=assignment4-net --ip=10.10.0.6 --name="node5" -e SOCKET_ADDRESS="10.10.0.6:8080" -e VIEW="10.10.0.2:8080,10.10.0.3:8080,10.10.0.4:8080,10.10.0.5:8080,10.10.0.6:8080,10.10.0.7:8080" -e SHARD_COUNT="2" assignment4-image
+
+sudo docker run -p 8087:8080 --net=assignment4-net --ip=10.10.0.7 --name="node6" -e SOCKET_ADDRESS="10.10.0.7:8080" -e VIEW="10.10.0.2:8080,10.10.0.3:8080,10.10.0.4:8080,10.10.0.5:8080,10.10.0.6:8080,10.10.0.7:8080" -e SHARD_COUNT="2" assignment4-image
+
+curl --request GET --header "Content-Type: application/json" --write-out "%{http_code}\n" http://10.10.0.2:8080/key-value-store-view
+
+curl --request DELETE --header "Content-Type: application/json" --write-out "%{http_code}\n" --data '{"socket-address": 10.10.0.4:8080 } 'http://<replica-socket-address>/key-value-store-view
+
+curl --request PUT --header "Content-Type: application/json" --write-out "%{http_code}\n" --data '{"value": "Data Structures"}' http://10.10.0.2:8080/key-value-store/course1

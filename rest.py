@@ -84,7 +84,7 @@ def get_node_shard_id():
     global SOCKET_ADDRESS
     shard_id = getShardID(SOCKET_ADDRESS)
     response = jsonify()
-    response.data = json.dumps({"message":"Shard ID of the node retrieved successfully", "shard-id":shard_id})
+    response.data = json.dumps({"message":"Shard ID of the node retrieved successfully", "shard-id":str(shard_id)})
     response.status_code = 200
     return response
 
@@ -154,14 +154,14 @@ def retrieve_shard_count():
 def get_forward_url(forward_address, key):
     return "http://" + forward_address + "/key-value-store/" + key
 
-def broadcast_request(key, version, metadata, json):
+def broadcast_request(key, version, metadata, json, shard):
     global SYS_VIEW
     print(SYS_VIEW, file=sys.stderr)
     print("test", file=sys.stderr)
     app.logger.info(SYS_VIEW)
     # Broadcast a DELETE call to every replica in View
     global VERSION
-    for replica in SYS_VIEW:
+    for replica in SHARD_MEMBERS[shard]:
         if SYS_VIEW[replica] and replica != SOCKET_ADDRESS:
             url = get_forward_url(replica, key)
             app.logger.info('[%s] Broadcasting to replica %s...',SOCKET_ADDRESS, replica)
@@ -177,20 +177,11 @@ def broadcast_request(key, version, metadata, json):
                 json = {"delete_replica":replica}
                 requests.delete(delete_url, json=json)
                 print(SYS_VIEW, file=sys.stderr)
-                # Delete View from replica
-                # Broadcast Delete
-                ''' 
-                for up_replica in SYS_VIEW:
-                    if SYS_VIEW[up_replica] and up_replica != replica:
-                        delete_url = "http://" + up_replica + "/key-value-store-view"
-                        json = {"delete_replica":replica}
-                        requests.delete(url, json=json)
-                '''
 
     print(SYS_VIEW, file=sys.stderr)
     print("DONE", file=sys.stderr)
     app.logger.info("Done broadcasting for %s", SOCKET_ADDRESS)
-    return
+    return response
 
 # Returns the forward response used by the forwarding instance
 def get_forward_response(forward_url, method, json=None):
@@ -232,15 +223,28 @@ def put(key):
         app.logger.info("[%s] a broadcasted message", SOCKET_ADDRESS)
         version = request.args.get('version')
         new_metadata = request.args.get('metadata')
-        
+        thisShardId = getShardID( SOCKET_ADDRESS )
+        if kvs.key_exists(key):
+            kvs.put(key, (version, value))
+            new_data = json.dumps({"message":"Updated successfully", "version":new_version, "causal-metadata":metadata,
+                "shard-id":str(thisShardId)})
+            json_data = jsonify(message="Added successfully", version=new_version)
+            json_data.data = new_data
+            response = json_data, 200
+        # Insert new key into KVS
+        else:
+            kvs.put(key, (version, value))
+            new_data = json.dumps({"message":"Added successfully", "version":new_version, "causal-metadata":metadata,
+                "shard-id":str(thisShardId)})
+            json_data = jsonify(message="Added successfully", version=new_version)
+            json_data.data = new_data
+            response = json_data, 201
         CAUSAL_HISTORY[version] = new_metadata
         version_num = request.args.get('version_num')
-        kvs.put(key, (version, value))
         VERSION = int(version_num)
         app.logger.info("[%s] successfully broadcasted version %s", SOCKET_ADDRESS, str(VERSION))
-
-
-        return "Successful broadcasted message", 200
+        print( "returned response" )
+        return response
 
     if metadata:
         for version in metadata.split(","):
@@ -253,28 +257,45 @@ def put(key):
     if len(key) > 50:
         return jsonify(error="Key is too long", message="Error in PUT"), 400
 
-    new_version = get_new_version()
-    if metadata:
-        metadata = metadata + ',' + new_version
+    shardForKey = hash( key ) % SHARD_COUNT
+    # If key belongs to this shard
+    thisShardId = getShardID( SOCKET_ADDRESS )
+    print( "This shard id: ", thisShardId )
+    print( "Shard for key: ", shardForKey )
+    if shardForKey == thisShardId:
+        new_version = get_new_version()
+        if metadata:
+            metadata = metadata + ',' + new_version
+        else:
+            metadata = new_version
+        # Update key if it already exists
+        if kvs.key_exists(key):
+            kvs.put(key, (new_version, value))
+            CAUSAL_HISTORY[new_version] = metadata
+            new_data = json.dumps({"message":"Updated successfully", "version":new_version, "causal-metadata":metadata,
+                "shard-id":str(thisShardId)})
+            json_data = jsonify(message="Added successfully", version=new_version)
+            json_data.data = new_data
+            response = json_data, 200
+        # Insert new key into KVS
+        else:
+            kvs.put(key, (new_version, value))
+            CAUSAL_HISTORY[new_version] = metadata
+            new_data = json.dumps({"message":"Added successfully", "version":new_version, "causal-metadata":metadata,
+                "shard-id":str(thisShardId)})
+            json_data = jsonify(message="Added successfully", version=new_version)
+            json_data.data = new_data
+            response = json_data, 201
+        # Open new process to call broadcast_put to all the replicas
+        # in this shard
+        broadcast = Process(target = broadcast_request, args=(key, new_version, metadata, request.get_json(), thisShardId))
+        broadcast.start()
+    # If key belongs to a different shard
     else:
-        metadata = new_version
-    if kvs.key_exists(key):
-        kvs.put(key, (new_version, value))
-        CAUSAL_HISTORY[new_version] = metadata
-        new_data = json.dumps({"message":"Updated successfully", "version":new_version, "causal-metadata":metadata})
-        json_data = jsonify(message="Added successfully", version=new_version)
-        json_data.data = new_data
-        response = json_data, 200
-    else:
-        kvs.put(key, (new_version, value))
-        CAUSAL_HISTORY[new_version] = metadata
-        new_data = json.dumps({"message":"Added successfully", "version":new_version, "causal-metadata":metadata})
-        json_data = jsonify(message="Added successfully", version=new_version)
-        json_data.data = new_data
-        response = json_data, 201
-    # Open new process to call broadcast_put so we don't have to wait
-    broadcast = Process(target = broadcast_request, args=(key, new_version, metadata, request.get_json()))
-    broadcast.start()
+        # Broadcast the message to the specific shard to put the key
+        response = broadcast_request(key, new_version, metadata,
+                                     request.get_json(), shardForKey)
+        print( "got response" )
     return response
 
 @app.route('/key-value-store/<key>', methods=['GET'])
@@ -285,15 +306,38 @@ def get(key):
     version = storedKey[0]
     metadata = CAUSAL_HISTORY[version]
 
-    # Main instance execution
-    if kvs.key_exists(key):
-        new_data = json.dumps({"message":"Retrieved successfully", "version":version, "causal-metadata":metadata, "value":value})
-        json_data = jsonify(message="Added successfully", version=version)
-        json_data.data = new_data
-        return json_data, 200
+    shardForKey = hash( key ) % SHARD_COUNT
+    # If key belongs to this shard
+    thisShardId = getShardID( SOCKET_ADDRESS )
+    if shardForKey == thisShardId:
+        # Main instance execution
+        if kvs.key_exists(key):
+            new_data = json.dumps({"message":"Retrieved successfully", "version":version, "causal-metadata":metadata, "value":value, "shard-id":str(thisShardId)})
+            json_data = jsonify(message="Added successfully", version=version)
+            json_data.data = new_data
+            return json_data, 200
+        else:
+            return jsonify(doesExist=False, error="Key does not exist", message="Error in GET"), 404
     else:
-        return jsonify(doesExist=False, error="Key does not exist", message="Error in GET"), 404
-
+        # Forward the request to a replica that the key belongs to
+        for replica in SHARD_MEMBERS[shardForKey]:
+            # If the replica is not itself or we believe is not down
+            if SYS_VIEW[replica] and replica != SOCKET_ADDRESS:
+                # Try to get the response
+                try:
+                    get_url = "http://" + replica + "/key-value-store/" + key
+                    response = requests.get( get_url, timeout=TIMEOUT )
+                    # Return the message from the first replica that
+                    # responds
+                    return response
+                # If we've timeout from making the request to that
+                # replica delete the replica from our view
+                except requests.exceptions.RequestException:
+                    SYS_VIEW[replica] = False
+                    delete_url = "http://" + SOCKET_ADDRESS + "/key-value-store-view"
+                    json = {"delete_replica":replica}
+                    requests.delete( delete_url, json=json)
+                
 @app.route('/key-value-store/<key>', methods=['DELETE'])
 def delete(key):
     global VERSION
@@ -303,15 +347,28 @@ def delete(key):
     if request.args.get('broadcasted'):
         app.logger.info("[%s] a broadcasted message", SOCKET_ADDRESS)
         version = request.args.get('version')
-        
         CAUSAL_HISTORY[version] = metadata
         version_num = request.args.get('version_num')
-        kvs.put(key, (version, None))
         VERSION = int(version_num)
         app.logger.info("[%s] successfully broadcasted version %s", SOCKET_ADDRESS, str(VERSION))
-
-
-        return "Successful broadcasted message", 200
+        if kvs.key_exists(key):
+            # Get new version
+            new_version = get_new_version()
+            if metadata:
+                metadata + ',' + new_version
+            else:
+                metadata = new_version
+            kvs.put(key, (new_version, None))
+            CAUSAL_HISTORY[new_version] = metadata
+            thisShardId = getShardID( SOCKET_ADDRESS )
+            new_data = json.dumps({"message":"Deleted successfully", " version":new_version, "causal-metadata":metadata,
+                "shard-id":str(thisShardId)})
+            json_data = jsonify(message="Added successfully", version=new_version)
+            json_data.data = new_data
+            response = json_data, 200
+        else:
+            return jsonify(doesExist=False, error="Key does not exist", message="Error in DELETE"), 404
+        return response
 
     metadata = content.get('causal-metadata', '') if content else ''
     if metadata:
@@ -320,24 +377,35 @@ def delete(key):
             app.logger.info("waiting for version %s", version)
             while not version in CAUSAL_HISTORY:
                 pass
-    if kvs.key_exists(key):
-        # Get new version
-        new_version = get_new_version()
-        if metadata:
-            metadata + ',' + new_version
+    shardForKey = hash( key ) % SHARD_COUNT
+    # If key belongs to this shard
+    thisShardId = getShardID( SOCKET_ADDRESS )
+    if shardForKey == thisShardId:
+        if kvs.key_exists(key):
+            # Get new version
+            new_version = get_new_version()
+            if metadata:
+                metadata + ',' + new_version
+            else:
+                metadata = new_version
+            kvs.put(key, (new_version, None))
+            CAUSAL_HISTORY[new_version] = metadata
+            new_data = json.dumps({"message":"Deleted successfully", " version":new_version, "causal-metadata":metadata,
+                "shard-id":str(thisShardId)})
+            json_data = jsonify(message="Added successfully", version=new_version)
+            json_data.data = new_data
+            response = json_data, 200
         else:
-            metadata = new_version
-        kvs.put(key, (new_version, None))
-        CAUSAL_HISTORY[new_version] = metadata
-        new_data = json.dumps({"message":"Deleted successfully", "version":new_version, "causal-metadata":metadata})
-        json_data = jsonify(message="Added successfully", version=new_version)
-        json_data.data = new_data
-        response = json_data, 200
+            return jsonify(doesExist=False, error="Key does not exist", message="Error in DELETE"), 404
+        # Open new process to call broadcast_put to all the replicas
+        # in this shard
+        broadcast = Process(target = broadcast_request, args=(key, new_version, metadata, request.get_json(), thisShardId))
+        broadcast.start()
+    # If key belongs to a different shard
     else:
-        return jsonify(doesExist=False, error="Key does not exist", message="Error in DELETE"), 404
-    # Use Process to broadcast so we don't have to wait
-    broadcast = Process(target = broadcast_request, args=(key, new_version, metadata, request.get_json()))
-    broadcast.start()
+        # Broadcast the message to that shard to delete the key
+        response = broadcast_request(key, new_version, metadata,
+                                     request.get_json(), shardForKey)
     return response
 
 
@@ -431,7 +499,7 @@ def setup():
     
     SOCKET_ADDRESS = environ['SOCKET_ADDRESS']
     SYS_VIEW = initializeView(environ['VIEW'])
-    #CAUSAL_HISTORY = {'test_version':'test_metadata'}
+    CAUSAL_HISTORY = {'test_version':'test_metadata'}
     
     VERSION = int(0)
     TIMEOUT = 2.00
@@ -482,8 +550,6 @@ with app.app_context():
     
 
 if __name__ == '__main__':
-   #setup(environ['VIEW'], SOCKET_ADDRESS)
    hostPort = SOCKET_ADDRESS.split( ':' )
-   #app.run(host=hostPort[0], port=hostPort[1])
-   # app.logger.info("START")
-   app.run(host='0.0.0.0', port=8080, debug=True)
+   app.run(host=hostPort[0], port=hostPort[1])
+   app.logger.info("START")
