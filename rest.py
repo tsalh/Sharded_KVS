@@ -41,14 +41,10 @@ def initializeView(view_string):
 # As long as it's passed the same SYS_VIEW and SHARD_COUNT this will generate
 # the same shard_members.
 def assignShardMembers(sys_view, shard_count):
+    if shard_count == 0:
+        return [[]]
     view = list(sys_view.keys())
     view.sort()
-    if shard_count == 0:
-        view.delete(SOCKET_ADDRESS)
-        shard_count = retrieve_shard_count()
-        #this is an extre check so the assgn 3 script would still pass
-        if shard_count == 0:
-            return
     shard_members = [[] for i in range(shard_count)]
     shard_id = 0 
     for replica in view:
@@ -118,19 +114,25 @@ def add_shard_member(shard_id):
     global SOCKET_ADDRESS
     global SHARD_MEMBERS
     global SYS_VIEW
+    global SHARD_COUNT
     shard_id = int(shard_id)
     content = request.get_json()
     new_member = content['socket-address']
+    if new_member == SOCKET_ADDRESS:
+        SHARD_COUNT = int(request.args.get('shard_count'))
+        old_view = SYS_VIEW.copy()
+        del old_view[SOCKET_ADDRESS]
+        SHARD_MEMBERS = assignShardMembers(old_view, SHARD_COUNT)
     SHARD_MEMBERS[shard_id].append(new_member)
     if not request.args.get('broadcasted'):
         for replica in SYS_VIEW:
             if SYS_VIEW[replica] and replica != SOCKET_ADDRESS:
                 try:
                     forward_url = "http://" + replica + request.full_path
-                    requests.put(forward_url, json=request.get_json, params={'broadcasted':True}, timeout=TIMEOUT)
+                    requests.put(forward_url, json=request.get_json(), params={'broadcasted':True, 'shard_count':SHARD_COUNT}, timeout=TIMEOUT)
                 except requests.exceptions.RequestException:
                     app.logger.info("add-member broadcast to replica [%s] failed", replica)
-    return '', 204
+    return "Member added to shard", 200
 
 
 @app.route('/shard-count', methods=['GET'])
@@ -431,8 +433,7 @@ def setup():
     
     SOCKET_ADDRESS = environ['SOCKET_ADDRESS']
     SYS_VIEW = initializeView(environ['VIEW'])
-    #CAUSAL_HISTORY = {'test_version':'test_metadata'}
-    
+    CAUSAL_HISTORY = {'test_version':'test_metadata'}
     VERSION = int(0)
     TIMEOUT = 2.00
     SHARD_COUNT = int(os.getenv('SHARD_COUNT', '0'))
