@@ -80,7 +80,7 @@ def get_node_shard_id():
     global SOCKET_ADDRESS
     shard_id = getShardID(SOCKET_ADDRESS)
     response = jsonify()
-    response.data = json.dumps({"message":"Shard ID of the node retrieved successfully", "shard-id":shard_id})
+    response.data = json.dumps({"message":"Shard ID of the node retrieved successfully", "shard-id":str(shard_id)})
     response.status_code = 200
     return response
 
@@ -124,6 +124,9 @@ def add_shard_member(shard_id):
         del old_view[SOCKET_ADDRESS]
         SHARD_MEMBERS = assignShardMembers(old_view, SHARD_COUNT)
     SHARD_MEMBERS[shard_id].append(new_member)
+    print(("SYS_VIEW: " + str(SYS_VIEW)), file=sys.stderr)
+    print(("SHARD_COUNT: " + str(SHARD_COUNT)), file=sys.stderr)
+    print(("SHARD_MEMBERS: " + str(SHARD_MEMBERS)), file=sys.stderr)
     if not request.args.get('broadcasted'):
         for replica in SYS_VIEW:
             if SYS_VIEW[replica] and replica != SOCKET_ADDRESS:
@@ -134,7 +137,7 @@ def add_shard_member(shard_id):
                     app.logger.info("add-member broadcast to replica [%s] failed", replica)
     return "Member added to shard", 200
 
-
+''' This was for the old way of doing add member, probably not needed anymore
 @app.route('/shard-count', methods=['GET'])
 def get_shard_count():
     global SHARD_COUNT
@@ -151,6 +154,7 @@ def retrieve_shard_count():
             if (json['shard_count']):
                 return int(json['shard_count'])
     return 0
+'''
 
 # Returns the forward url
 def get_forward_url(forward_address, key):
@@ -351,7 +355,7 @@ def deleteView():
     content  = request.get_json()
     view_to_delete = content.get("delete_replica", '') if content else ''
     if view_to_delete:
-        if not SYS_VIEW[view_to_delete]:
+        if not view_to_delete in SYS_VIEW or SYS_VIEW[view_to_delete] == False:
             return jsonify( error="Socket address does not exist in the view", message="Error in DELETE"), 404
         else:
             SYS_VIEW[view_to_delete] = False
@@ -402,7 +406,7 @@ def putView():
     content  = request.get_json()
     add_replica = content.get("replica_sender") if content else ''
     if add_replica:
-        if SYS_VIEW[add_replica]:
+        if add_replica in SYS_VIEW and SYS_VIEW[add_replica] == True:
             return jsonify(error="Socket address already exists in the view", 
                     message="Error in PUT"), 404
         else:
