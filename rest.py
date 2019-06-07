@@ -156,8 +156,8 @@ def get_forward_url(forward_address, key):
 
 def broadcast_request(key, version, metadata, json, shard):
     global SYS_VIEW
-    print(SYS_VIEW, file=sys.stderr)
-    print("test", file=sys.stderr)
+#    print(SYS_VIEW, file=sys.stderr)
+#    print("test", file=sys.stderr)
     app.logger.info(SYS_VIEW)
     # Broadcast a DELETE call to every replica in View
     global VERSION
@@ -167,19 +167,21 @@ def broadcast_request(key, version, metadata, json, shard):
             app.logger.info('[%s] Broadcasting to replica %s...',SOCKET_ADDRESS, replica)
             payload = {'version_num':int(VERSION), 'version':version, 'broadcasted':True, 'metadata':metadata}
             try:
-                response = requests.put(url, json=json, params=payload, timeout=TIMEOUT)
+                broadcastResponse = requests.put(url, json=json, params=payload, timeout=TIMEOUT)
+                response = broadcastResponse.content, broadcastResponse.status_code
             except requests.exceptions.RequestException:
                 app.logger.info("broadcast to [%s] has failed", replica)
-                print("Removing from view", file=sys.stderr)
-                print(replica, file=sys.stderr)
+#                print("Removing from view", file=sys.stderr)
+#                print(replica, file=sys.stderr)
                 SYS_VIEW[replica] = False
                 delete_url = "http://" + SOCKET_ADDRESS + "/key-value-store-view"
                 json = {"delete_replica":replica}
                 requests.delete(delete_url, json=json)
-                print(SYS_VIEW, file=sys.stderr)
+#                print(SYS_VIEW, file=sys.stderr)
 
-    print(SYS_VIEW, file=sys.stderr)
-    print("DONE", file=sys.stderr)
+#    print(SYS_VIEW, file=sys.stderr)
+#    print("DONE", file=sys.stderr)
+#    print( response, file=sys.stderr )
     app.logger.info("Done broadcasting for %s", SOCKET_ADDRESS)
     return response
 
@@ -226,24 +228,24 @@ def put(key):
         thisShardId = getShardID( SOCKET_ADDRESS )
         if kvs.key_exists(key):
             kvs.put(key, (version, value))
-            new_data = json.dumps({"message":"Updated successfully", "version":new_version, "causal-metadata":metadata,
+            new_data = json.dumps({"message":"Updated successfully", "version":version, "causal-metadata":new_metadata,
                 "shard-id":str(thisShardId)})
-            json_data = jsonify(message="Added successfully", version=new_version)
+            json_data = jsonify(message="Added successfully", version=version)
             json_data.data = new_data
             response = json_data, 200
         # Insert new key into KVS
         else:
             kvs.put(key, (version, value))
-            new_data = json.dumps({"message":"Added successfully", "version":new_version, "causal-metadata":metadata,
+            new_data = json.dumps({"message":"Added successfully", "version":version, "causal-metadata":new_metadata,
                 "shard-id":str(thisShardId)})
-            json_data = jsonify(message="Added successfully", version=new_version)
+            json_data = jsonify(message="Added successfully", version=version)
             json_data.data = new_data
             response = json_data, 201
         CAUSAL_HISTORY[version] = new_metadata
         version_num = request.args.get('version_num')
         VERSION = int(version_num)
         app.logger.info("[%s] successfully broadcasted version %s", SOCKET_ADDRESS, str(VERSION))
-        print( "returned response" )
+#        print( "returned response", file=sys.stderr )
         return response
 
     if metadata:
@@ -265,8 +267,10 @@ def put(key):
         metadata = metadata + ',' + new_version
     else:
         metadata = new_version
-    print( "This shard id: ", thisShardId )
-    print( "Shard for key: ", shardForKey )
+    print( "Key: ", key )
+    print( "This shard id: ", thisShardId, file=sys.stderr )
+    print( "Shard for key: ", shardForKey, file=sys.stderr )
+    print( SHARD_MEMBERS[shardForKey], file=sys.stderr )
     if shardForKey == thisShardId:
         # Update key if it already exists
         if kvs.key_exists(key):
@@ -290,12 +294,15 @@ def put(key):
         # in this shard
         broadcast = Process(target = broadcast_request, args=(key, new_version, metadata, request.get_json(), thisShardId))
         broadcast.start()
+#        print( "stalling???",file=sys.stderr )
     # If key belongs to a different shard
     else:
         # Broadcast the message to the specific shard to put the key
         response = broadcast_request(key, new_version, metadata,
                                      request.get_json(), shardForKey)
-        print( "got response" )
+#        print( "Why is it stalling???",file=sys.stderr )
+#    print( "got response", file=sys.stderr )
+#    print( response, file=sys.stderr )
     return response
 
 @app.route('/key-value-store/<key>', methods=['GET'])
@@ -441,10 +448,10 @@ def get_kvs():
 @app.route( '/key-value-store-view', methods=['GET'])
 def getView():
     global SYS_VIEW
-    print("TESTING GET VIEW", file=sys.stderr)
+#    print("TESTING GET VIEW", file=sys.stderr)
     for replica in SYS_VIEW:
         url = "http://" + replica + "/connect"
-        print(url, file=sys.stderr)
+#        print(url, file=sys.stderr)
         try:
             if replica != SOCKET_ADDRESS:
                 response = requests.get(url, timeout=TIMEOUT)
@@ -454,7 +461,7 @@ def getView():
             app.logger.info(response)
 
     view_string = ''
-    print(SYS_VIEW, file=sys.stderr)
+#    print(SYS_VIEW, file=sys.stderr)
     for key in SYS_VIEW:
         if SYS_VIEW[key]:
             view_string = view_string + key + ','
@@ -513,19 +520,19 @@ def setup():
         if SYS_VIEW[replica] == False:
             try:
                 url = "http://" + replica + "/key-value-store-view"
-                print("Put URL:" + url)
+#                print("Put URL:" + url)
                 response = requests.put(url, json={"replica_sender":SOCKET_ADDRESS}, timeout=TIMEOUT)
                 SYS_VIEW[replica] = True
-                print(SYS_VIEW)
-                print(replica)
+#                print(SYS_VIEW)
+#                print(replica)
             except requests.exceptions.RequestException:
                 app.logger.info("Unable to connect to replica %s", replica)
                 crashed_replicas.append(replica)
     # Delete Crashed replicas
     app.logger.info("Deleting replicas from view")
     for replica in crashed_replicas:
-        print("Crashed_replicas:")
-        print(crashed_replicas)
+#        print("Crashed_replicas:")
+#        print(crashed_replicas)
         try:
             url = "http://" + replica + "/key-value-store-view"
             response = requests.delete(url, json={"delete_replica":replica}, timeout=1)
@@ -543,8 +550,8 @@ def setup():
             causal_list = json.loads(causal_response.content)
             append_causal(causal_list[0])
             append_kvs(kvs_list[0])
-            print(CAUSAL_HISTORY)
-            print(kvs.get_dictionary())
+#            print(CAUSAL_HISTORY)
+#            print(kvs.get_dictionary())
 with app.app_context():
     setup()
     

@@ -64,7 +64,7 @@ class TestHW3(unittest.TestCase):
 
     shardIdList = []
     shardsMemberList = []
-    keyCount = 1200
+    keyCount = 600
 
     ######################## Build docker image and create subnet ################################
     print("###################### Building Docker Image ######################\n")
@@ -162,17 +162,21 @@ class TestHW3(unittest.TestCase):
         print("\n###################### Getting the Shard ID of the nodes ######################\n")
 
         shard1 = self.shardIdList[0]
+
         # get the shard id of node1
         response = requests.get( 'http://localhost:8082/key-value-store-shard/node-shard-id')
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
+
         node1ShardId = responseInJson['shard-id']
 
         self.assertTrue(node1ShardId in self.shardIdList)
+
         if node1ShardId == shard1:
             self.assertTrue(nodeSocketAddressList[0] in self.shardsMemberList[0].split(","))
         else:
             self.assertTrue(nodeSocketAddressList[0] in self.shardsMemberList[1].split(","))
+
         # get the shard id of node2
         response = requests.get('http://localhost:8083/key-value-store-shard/node-shard-id')
         responseInJson = response.json()
@@ -186,6 +190,7 @@ class TestHW3(unittest.TestCase):
             self.assertTrue(nodeSocketAddressList[1] in self.shardsMemberList[0].split(","))
         else:
             self.assertTrue(nodeSocketAddressList[1] in self.shardsMemberList[1].split(","))
+
 
         # get the shard id of node6
         response = requests.get('http://localhost:8087/key-value-store-shard/node-shard-id')
@@ -211,6 +216,7 @@ class TestHW3(unittest.TestCase):
         for counter in range(self.keyCount):
             nodeIndex = counter % len(nodeIpList)
             print( counter )
+            print( nodeHostPortList[nodeIndex] )
             # put a new key in the store
             response = requests.put('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter), json={'value': "value" + str(counter), "causal-metadata": nextCausalMetadata})
             responseInJson = response.json()
@@ -219,8 +225,11 @@ class TestHW3(unittest.TestCase):
             nextCausalMetadata = responseInJson["causal-metadata"]
 
             keyShardId = responseInJson["shard-id"]
+
             self.assertTrue(keyShardId in self.shardIdList)
 
+            time.sleep(10)
+"""
     def test_e_get_key_value_operation(self):
 
         time.sleep(10)
@@ -231,11 +240,10 @@ class TestHW3(unittest.TestCase):
         for counter in range(self.keyCount):
 
             nodeIndex = (counter + 1 ) % len(nodeIpList)
-            print( counter )
+
             # get the value of the key
             response = requests.get('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter))
             responseInJson = response.json()
-            print( responseInJson )
             self.assertEqual(response.status_code, 200)
             value = responseInJson["value"]
             self.assertEqual(value, "value" + str(counter))
@@ -263,14 +271,17 @@ class TestHW3(unittest.TestCase):
         self.assertEqual(self.keyCount, shard1KeyCount + shard2KeyCount)
 
         # check whether keys distributed almost uniformly
-        # 500 < shard1-key-count < 700
-        self.assertGreater(shard1KeyCount, 500)
-        self.assertLess(shard1KeyCount, 700)
+        minKeyCount = int ((self.keyCount * 0.75) / shardCount)
+        maxKeyCount = int ((self.keyCount * 1.25) / shardCount)
 
-        # 500 < shard2-key-count < 700
-        self.assertGreater(shard2KeyCount, 500)
-        self.assertLess(shard2KeyCount, 700)
-"""
+        # minKeyCount < shard2-key-count < maxKeyCount
+        self.assertGreater(shard1KeyCount, minKeyCount)
+        self.assertLess(shard1KeyCount, maxKeyCount)
+
+        # minKeyCount < shard2-key-count < maxKeyCount
+        self.assertGreater(shard2KeyCount, minKeyCount)
+        self.assertLess(shard2KeyCount, maxKeyCount)
+
     def test_g_add_new_node(self):
 
         shard2 = self.shardIdList[1]
@@ -416,17 +427,20 @@ class TestHW3(unittest.TestCase):
         self.assertEqual(self.keyCount, shard1KeyCount + shard2KeyCount + shard3KeyCount)
 
         # check whether keys distributed almost uniformly
-        # 300 < shard1-key-count < 500
-        self.assertGreater(shard1KeyCount, 300)
-        self.assertLess(shard1KeyCount, 500)
+        minKeyCount = int ((self.keyCount * 0.75) / 3)
+        maxKeyCount = int ((self.keyCount * 1.25) / 3)
 
-        # 300 < shard2-key-count < 500
-        self.assertGreater(shard2KeyCount, 300)
-        self.assertLess(shard2KeyCount, 500)
+        # minKeyCount < shard1-key-count < maxKeyCount
+        self.assertGreater(shard1KeyCount, minKeyCount)
+        self.assertLess(shard1KeyCount, maxKeyCount)
 
-        # 300 < shard3-key-count < 500
-        self.assertGreater(shard3KeyCount, 300)
-        self.assertLess(shard3KeyCount, 500)
+        # minKeyCount < shard2-key-count < maxKeyCount
+        self.assertGreater(shard2KeyCount, minKeyCount)
+        self.assertLess(shard2KeyCount, maxKeyCount)
+
+        # minKeyCount < shard3-key-count < maxKeyCount
+        self.assertGreater(shard3KeyCount, minKeyCount)
+        self.assertLess(shard3KeyCount, maxKeyCount)
 
         for counter in range(self.keyCount):
 
