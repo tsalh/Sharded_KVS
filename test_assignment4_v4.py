@@ -280,7 +280,7 @@ class TestHW3(unittest.TestCase):
         # minKeyCount < shard2-key-count < maxKeyCount
         self.assertGreater(shard2KeyCount, minKeyCount)
         self.assertLess(shard2KeyCount, maxKeyCount)
-"""
+
     def test_g_add_new_node(self):
 
         shard2 = self.shardIdList[1]
@@ -451,6 +451,6 @@ class TestHW3(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             value = responseInJson["value"]
             self.assertEqual(value, "value" + str(counter))
-"""
+
 if __name__ == '__main__':
     unittest.main()
