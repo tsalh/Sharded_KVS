@@ -35,14 +35,10 @@ def initializeView(view_string):
 # As long as it's passed the same SYS_VIEW and SHARD_COUNT this will generate
 # the same shard_members.
 def assignShardMembers(sys_view, shard_count):
+    if shard_count == 0:
+        return [[]]
     view = list(sys_view.keys())
     view.sort()
-    if shard_count == 0:
-        view.delete(SOCKET_ADDRESS)
-        shard_count = retrieve_shard_count()
-        #this is an extre check so the assgn 3 script would still pass
-        if shard_count == 0:
-            return
     shard_members = [[] for i in range(shard_count)]
     shard_id = 0 
     for replica in view:
@@ -112,21 +108,30 @@ def add_shard_member(shard_id):
     global SOCKET_ADDRESS
     global SHARD_MEMBERS
     global SYS_VIEW
+    global SHARD_COUNT
     shard_id = int(shard_id)
     content = request.get_json()
     new_member = content['socket-address']
+    if new_member == SOCKET_ADDRESS:
+        SHARD_COUNT = int(request.args.get('shard_count'))
+        old_view = SYS_VIEW.copy()
+        del old_view[SOCKET_ADDRESS]
+        SHARD_MEMBERS = assignShardMembers(old_view, SHARD_COUNT)
     SHARD_MEMBERS[shard_id].append(new_member)
+    print(("SYS_VIEW: " + str(SYS_VIEW)), file=sys.stderr)
+    print(("SHARD_COUNT: " + str(SHARD_COUNT)), file=sys.stderr)
+    print(("SHARD_MEMBERS: " + str(SHARD_MEMBERS)), file=sys.stderr)
     if not request.args.get('broadcasted'):
         for replica in SYS_VIEW:
             if SYS_VIEW[replica] and replica != SOCKET_ADDRESS:
                 try:
                     forward_url = "http://" + replica + request.full_path
-                    requests.put(forward_url, json=request.get_json, params={'broadcasted':True}, timeout=TIMEOUT)
+                    requests.put(forward_url, json=request.get_json(), params={'broadcasted':True, 'shard_count':SHARD_COUNT}, timeout=TIMEOUT)
                 except requests.exceptions.RequestException:
                     app.logger.info("add-member broadcast to replica [%s] failed", replica)
-    return '', 204
+    return "Member added to shard", 200
 
-
+''' This was for the old way of doing add member, probably not needed anymore
 @app.route('/shard-count', methods=['GET'])
 def get_shard_count():
     global SHARD_COUNT
@@ -143,6 +148,7 @@ def retrieve_shard_count():
             if (json['shard_count']):
                 return int(json['shard_count'])
     return 0
+'''
 
 # Returns the forward url
 def get_forward_url(forward_address, key):
@@ -444,7 +450,7 @@ def deleteView():
     content  = request.get_json()
     view_to_delete = content.get("delete_replica", '') if content else ''
     if view_to_delete:
-        if not SYS_VIEW[view_to_delete]:
+        if view_to_delete not in SYS_VIEW or SYS_VIEW[view_to_delete] == False:
             return jsonify( error="Socket address does not exist in the view", message="Error in DELETE"), 404
         else:
             SYS_VIEW[view_to_delete] = False
@@ -495,7 +501,7 @@ def putView():
     content  = request.get_json()
     add_replica = content.get("replica_sender") if content else ''
     if add_replica:
-        if SYS_VIEW[add_replica]:
+        if add_replica in SYS_VIEW and SYS_VIEW[add_replica] == True:
             return jsonify(error="Socket address already exists in the view", 
                     message="Error in PUT"), 404
         else:

@@ -451,6 +451,6 @@ class TestHW3(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             value = responseInJson["value"]
             self.assertEqual(value, "value" + str(counter))
-"""
+
 if __name__ == '__main__':
     unittest.main()
