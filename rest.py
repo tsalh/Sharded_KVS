@@ -117,10 +117,9 @@ def add_shard_member(shard_id):
         old_view = SYS_VIEW.copy()
         del old_view[SOCKET_ADDRESS]
         SHARD_MEMBERS = assignShardMembers(old_view, SHARD_COUNT)
+        myShard = getShardID(SOCKET_ADDRESS)
+        get_state(SHARD_MEMBERS[myShard])
     SHARD_MEMBERS[shard_id].append(new_member)
-    print(("SYS_VIEW: " + str(SYS_VIEW)), file=sys.stderr)
-    print(("SHARD_COUNT: " + str(SHARD_COUNT)), file=sys.stderr)
-    print(("SHARD_MEMBERS: " + str(SHARD_MEMBERS)), file=sys.stderr)
     if not request.args.get('broadcasted'):
         for replica in SYS_VIEW:
             if SYS_VIEW[replica] and replica != SOCKET_ADDRESS:
@@ -130,6 +129,27 @@ def add_shard_member(shard_id):
                 except requests.exceptions.RequestException:
                     app.logger.info("add-member broadcast to replica [%s] failed", replica)
     return "Member added to shard", 200
+
+@app.route('/key-value-store-shard/reshard', methods=['PUT'])
+def reshard():
+    global SHARD_COUNT
+    global SHARD_MEMBERS
+    content = request.get_json()
+    shard_count = int(content['shard-count'])
+    if (shard_count * 2) >= len(SYS_VIEW):    
+        return jsonify(message="Not enough nodes to provide fault-tolerance with the given shard count!"), 400
+    else :
+        SHARD_COUNT = shard_count
+        SHARD_MEMBERS = assignShardMembers(SYS_VIEW, SHARD_COUNT)
+        if not request.args.get('broadcasted'):
+            for replica in SYS_VIEW:
+                if SYS_VIEW[replica] and replica != SOCKET_ADDRESS:
+                    try:
+                        forward_url = "http://" + replica + request.full_path:
+                        requests.put(forward_url, json=request.get_json(), params={'broadcasted':True}, timeout=TIMEOUT)
+                    except requests.exceptions.RequestException:
+                        app.logger.info("reshard broadcast to replica [%s] failed", replica)
+
 
 ''' This was for the old way of doing add member, probably not needed anymore
 @app.route('/shard-count', methods=['GET'])
@@ -520,6 +540,18 @@ def append_kvs(kvs_import):
         if not kvs.key_exists(key):
             kvs.put(key, kvs_import[key])
 
+def get_state(shard_member_list):
+    for replica in shard_member_list:
+        if replica != SOCKET_ADDRESS and SYS_VIEW[replica] == True:
+            kvs_url = "http://" + replica + "/kvs"
+            causal_url = "http://" + replica + "/connect"
+            kvs_response = requests.get(kvs_url)
+            causal_response = requests.get(causal_url)
+            kvs_list = json.loads(kvs_response.content)
+            causal_list = json.loads(causal_response.content)
+            append_causal(causal_list[0])
+            append_kvs(kvs_list[0])
+
 
 def setup():
     global SOCKET_ADDRESS
@@ -541,7 +573,6 @@ def setup():
 
     
     SYS_VIEW[SOCKET_ADDRESS] = True
-    crashed_replicas = []
     for replica in SYS_VIEW:
         if SYS_VIEW[replica] == False:
             try:
@@ -553,19 +584,24 @@ def setup():
 #                print(replica)
             except requests.exceptions.RequestException:
                 app.logger.info("Unable to connect to replica %s", replica)
-                crashed_replicas.append(replica)
     # Delete Crashed replicas
     app.logger.info("Deleting replicas from view")
-    for replica in crashed_replicas:
-#        print("Crashed_replicas:")
-#        print(crashed_replicas)
-        try:
-            url = "http://" + replica + "/key-value-store-view"
-            response = requests.delete(url, json={"delete_replica":replica}, timeout=1)
-            app.logger.info(response)
-        except requests.exceptions.RequestException:
-            print("Here")
-            
+    for live_replica in SYS_VIEW:
+        if SYS_VIEW[live_replica] == True and live_replica != SOCKET_ADDRESS:
+            for dead_replica in SYS_VIEW:
+                if SYS_VIEW[dead_replica] == False:
+                    try:
+                        url = "http://" + live_replica + "/key-value-store-view"
+                        response = requests.delete(url, json={"delete_replica":dead_replica}, timeout=1)
+                        app.logger.info(response)
+                    except requests.exceptions.RequestException:
+                        print("Here")
+
+    if SHARD_COUNT > 0:
+        myShard = getShardID(SOCKET_ADDRESS)
+        get_state(SHARD_MEMBERS[myShard])
+    #Otherwise wait for add-member to be called to get state from shard members
+'''            
     for replica in SYS_VIEW:
         if replica != SOCKET_ADDRESS and SYS_VIEW[replica] == True:
             kvs_url = "http://" + replica + "/kvs"
@@ -578,6 +614,8 @@ def setup():
             append_kvs(kvs_list[0])
 #            print(CAUSAL_HISTORY)
 #            print(kvs.get_dictionary())
+'''
+
 with app.app_context():
     setup()
     
