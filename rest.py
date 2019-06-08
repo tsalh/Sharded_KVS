@@ -227,7 +227,6 @@ def put(key):
         thisShardId = getShardID( SOCKET_ADDRESS )
         if kvs.key_exists(key):
             kvs.put(key, (version, value))
-            print( "wwwwwwwwwwwwwwwwwwwwwwwwwwwwww")
             new_data = json.dumps({"message":"Updated successfully", "version":version, "causal-metadata":new_metadata,
                 "shard-id":str(thisShardId)})
             json_data = jsonify(message="Added successfully", version=version)
@@ -236,7 +235,6 @@ def put(key):
         # Insert new key into KVS
         else:
             kvs.put(key, (version, value))
-            print( "wwwwwwwwwwwwwwwwwwwwwwwwwwwwww")
             new_data = json.dumps({"message":"Added successfully", "version":version, "causal-metadata":new_metadata,
                 "shard-id":str(thisShardId)})
             json_data = jsonify(message="Added successfully", version=version)
@@ -277,7 +275,6 @@ def put(key):
         if kvs.key_exists(key) and kvs.get(key)[1] != None:
             kvs.put(key, (new_version, value))
             CAUSAL_HISTORY[new_version] = metadata
-            print( "wwwwwwwwwwwwwwwwwwwwwwwwwwwwww")
             new_data = json.dumps({"message":"Updated successfully", "version":new_version, "causal-metadata":metadata,
                 "shard-id":str(thisShardId)})
             json_data = jsonify(message="Added successfully", version=new_version)
@@ -287,7 +284,6 @@ def put(key):
         else:
             kvs.put(key, (new_version, value))
             CAUSAL_HISTORY[new_version] = metadata
-            print( "wwwwwwwwwwwwwwwwwwwwwwwwwwwwww")
             new_data = json.dumps({"message":"Added successfully", "version":new_version, "causal-metadata":metadata,
                 "shard-id":str(thisShardId)})
             json_data = jsonify(message="Added successfully", version=new_version)
@@ -311,6 +307,10 @@ def get(key):
     shardForKey = hash( key ) % SHARD_COUNT
     # If key belongs to this shard
     thisShardId = getShardID( SOCKET_ADDRESS )
+    print( "Key: ", key, file=sys.stderr )
+    print( "This shard id: ", thisShardId, file=sys.stderr )
+    print( "Shard for key: ", shardForKey, file=sys.stderr )
+    print( SHARD_MEMBERS[shardForKey], file=sys.stderr )
     if shardForKey == thisShardId:
         # Main instance execution
         if kvs.key_exists(key):
@@ -318,9 +318,12 @@ def get(key):
             value = storedKey[1]
             version = storedKey[0]
             metadata = CAUSAL_HISTORY[version]
-            new_data = json.dumps({"message":"Retrieved successfully", "version":version, "causal-metadata":metadata, "value":value, "shard-id":str(thisShardId)})
+            new_data = getJson( "Retrieved successfully", version,
+                metadata, value, str(thisShardId) )
+            print( new_data, file=sys.stderr )
             json_data = jsonify(message="Added successfully", version=version)
             json_data.data = new_data
+            print( json_data, file=sys.stderr )
             return json_data, 200
         else:
             return jsonify(doesExist=False, error="Key does not exist", message="Error in GET"), 404
@@ -332,9 +335,10 @@ def get(key):
                 # Try to get the response
                 try:
                     get_url = "http://" + replica + "/key-value-store/" + key
-                    response = requests.get( get_url, timeout=TIMEOUT )
+                    responseObj = requests.get( get_url, timeout=TIMEOUT )
                     # Return the message from the first replica that
                     # responds
+                    response = responseObj.content, responseObj.status_code
                     return response
                 # If we've timeout from making the request to that
                 # replica delete the replica from our view
@@ -343,7 +347,30 @@ def get(key):
                     delete_url = "http://" + SOCKET_ADDRESS + "/key-value-store-view"
                     json = {"delete_replica":replica}
                     requests.delete( delete_url, json=json)
-                
+"""
+@app.route('/key-value-store/<key>', methods=['GET'])
+def get(key):
+    global VERSION
+#    storedKey = kvs.get(key)
+#    value = storedKey[1]
+#    version = storedKey[0]
+#    metadata = CAUSAL_HISTORY[version]
+    k = json.dumps({"message":"what"})
+    # Main instance execution
+    if kvs.key_exists(key) and kvs.get(key)[1] != None:
+        version, value = kvs.get(key)
+        metadata =CAUSAL_HISTORY[version]
+        new_data = json.dumps({"message":"Retrieved successfully", "version":version, "causal-metadata":metadata, "value":value})
+        json_data = jsonify(message="Added successfully", version=version)
+        json_data.data = new_data
+        return json_data, 200
+    else:
+        return jsonify(doesExist=False, error="Key does not exist", message="Error in GET"), 404
+"""
+def getJson( message, metadata, version, value, shardID ):
+
+    return json.dumps( {"message":message, "version":version, "causal-metadata":metadata, "value":value, "shard-id": shardID} )
+
 @app.route('/key-value-store/<key>', methods=['DELETE'])
 def delete(key):
     global VERSION
