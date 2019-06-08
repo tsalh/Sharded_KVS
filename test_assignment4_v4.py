@@ -215,12 +215,9 @@ class TestHW3(unittest.TestCase):
 
         for counter in range(self.keyCount):
             nodeIndex = counter % len(nodeIpList)
-            print( counter )
-            print( nodeHostPortList[nodeIndex] )
             # put a new key in the store
             response = requests.put('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter), json={'value': "value" + str(counter), "causal-metadata": nextCausalMetadata})
             responseInJson = response.json()
-            print( responseInJson )
             self.assertEqual(response.status_code, 201)
             nextCausalMetadata = responseInJson["causal-metadata"]
 
@@ -228,8 +225,8 @@ class TestHW3(unittest.TestCase):
 
             self.assertTrue(keyShardId in self.shardIdList)
 
-            time.sleep(10)
-"""
+#            time.sleep(1)
+
     def test_e_get_key_value_operation(self):
 
         time.sleep(10)
@@ -260,12 +257,14 @@ class TestHW3(unittest.TestCase):
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         shard1KeyCount = int(responseInJson['shard-id-key-count'])
+        print( shard1KeyCount )
 
         # get the shard2 key count from node3
         response = requests.get( 'http://localhost:8084/key-value-store-shard/shard-id-key-count/' + shard2)
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         shard2KeyCount = int(responseInJson['shard-id-key-count'])
+        print( shard2KeyCount )
 
         # sum of key counts in shards == total keys
         self.assertEqual(self.keyCount, shard1KeyCount + shard2KeyCount)
@@ -281,7 +280,7 @@ class TestHW3(unittest.TestCase):
         # minKeyCount < shard2-key-count < maxKeyCount
         self.assertGreater(shard2KeyCount, minKeyCount)
         self.assertLess(shard2KeyCount, maxKeyCount)
-
+"""
     def test_g_add_new_node(self):
 
         shard2 = self.shardIdList[1]
