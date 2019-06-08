@@ -3,3 +3,21 @@ using the causal dependency list
 
 To detect a replica is down we set a timeout for 2 seconds if the replica does
 not respond we assume it is down and change the view.
+
+To assign members to shards we have a helper function called assignShards, as
+long as its passed the same view and shard count it will generate the same 
+mapping of nodes to shards. This allows each node to generate a complete shard
+membership list that is consistent with the others as long as shard count
+and view are consistent.
+
+The resharding mechanism first checks if the shard count is valid for the number 
+of nodes in the view, it then generates a new shard members list using the 
+assignShards function based on the new shard count. It then gets the state 
+from each node in the view but only saves the keys that belong to it's new
+shard assignment.
+
+
+
+
+
+
